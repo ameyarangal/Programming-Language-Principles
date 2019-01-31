@@ -1,0 +1,482 @@
+;#lang racket
+
+#;
+(require "parenthec.rkt")
+
+(define-union expr
+(const cexp)
+(var n)
+(if test conseq alt)
+(mult nexp1 nexp2)
+(sub1 nexp)
+(zero nexp)
+(letcc body)
+(throw kexp vexp)
+(let exp body)              
+(lambda body)
+(app rator rand))
+
+
+(define-registers e env k arg y clos a)
+(define-program-counter pc)
+
+(define-label value-of-cps ; e env k
+(union-case e expr
+[(const expr) (begin
+(set! arg expr)
+(set! pc apply-k))
+#;
+(let* ([k k]
+[arg expr])
+(apply-k k arg))]
+[(mult x1 x2) (begin
+(set! k (kt_outer-k-mult x1 env k))
+(set! e x2)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-outer-k-mult x1 env k)]
+[e x2])
+(value-of-cps e env k))]
+[(sub1 x) (begin
+(set! k (kt_k-sub1 k))
+(set! e x)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-k-sub1 k)]
+[e x])
+(value-of-cps e env k))]
+[(zero x) (begin
+(set! k (kt_k-zero k))
+(set! e x)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-k-zero k)]
+[e x])
+(value-of-cps e env k))
+]
+[(if test conseq alt) (begin
+(set! k (kt_k-if conseq alt env k))
+(set! e test)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-k-if conseq alt env k)]
+[e test])
+(value-of-cps e env k))
+]
+[(letcc body) (begin
+(set! env (envr_extend k env))
+(set! e body)
+(set! pc value-of-cps))
+#;
+(let* ([env (extend-env k env)]
+[e body])
+(value-of-cps e env k))
+]
+[(throw k-exp v-exp) (begin
+(set! k (kt_outer-k-throw k-exp env k))
+(set! e v-exp)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-outer-k-throw k-exp env k)]
+[e v-exp])
+(value-of-cps e env k))
+]
+[(let e1 body) (begin
+(set! k (kt_outer-k-let env body k))
+(set! e e1)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-outer-k-let env body k)])
+(value-of-cps e env k))
+]
+[(var expr) (begin
+(set! y expr)
+(set! pc apply-env))
+#;
+(let* ([y expr])
+(apply-env env y k))
+]
+[(lambda body) (begin
+(set! arg (closure_make body env))
+(set! pc apply-k))
+#;
+(let* ([arg (make-closure body env)])
+(apply-k k arg))
+]
+[(app rator rand) (begin
+(set! k (kt_outer-k-application rator env k))
+(set! e rand)
+(set! pc value-of-cps))
+#;
+(let* ([k (make-outer-k-application rator env k)]
+[e rand])
+(value-of-cps e env k))
+]))
+
+#;
+(define make-closure
+(lambda (body env)
+(closure_make body env)))
+
+(define-union closure
+(make body env))
+
+(define-label apply-closure ; clos a k
+(union-case clos closure
+[(make body env1) (begin
+(set! env (envr_extend a env1))
+(set! e body)
+(set! pc value-of-cps))
+
+#;
+(let* ([env (extend-env a env)]
+[e body])
+(value-of-cps e env k))
+]))
+
+
+#;
+(define extend-env
+(lambda (a env)
+(envr_extend a env)))
+
+#;
+(define empty-env
+(lambda ()
+(envr_empty)))
+
+(define-union envr
+(empty)
+(extend a env))
+
+(define-label apply-env ; env y k
+(union-case env envr
+
+[(empty) (printf "error")
+#;
+(begin
+(set! arg '())
+(set! pc apply-k))
+#;
+(let* ([arg '()])
+(apply-k k arg))
+               ]
+              [(extend narg oldEnv) (if (zero? y)
+                                        (begin
+                                          (set! arg narg)
+                                          (set! pc apply-k))
+                                        (begin
+                                          (set! y (sub1 y))
+                                          (set! env oldEnv)
+                                          (set! pc apply-env))
+                                        #;
+                                        (let* ([arg narg])
+                                          (apply-k k arg))
+                                        #;
+                                        (let* ([y (sub1 y)]
+                                               [env oldEnv])
+                                          (apply-env env y k)))]))
+
+
+#;
+(define make-letcc-k
+  (lambda (body k)
+    (kt_letcc-k body k)))
+#;
+(define make-outer-k-mult
+  (lambda (x1 env k)
+    (kt_outer-k-mult x1 env k)))
+#;
+(define make-inner-k-mult
+  (lambda (x2 k)
+    (kt_inner-k-mult x2 k)))
+#;
+(define make-k-sub1
+  (lambda (k)
+    (kt_k-sub1 k)))
+#;
+(define make-k-zero
+  (lambda (k)
+    (kt_k-zero k)))
+#;
+(define make-k-if
+  (lambda (conseq alt env k)
+    (kt_k-if conseq alt env k)))
+#;
+(define make-outer-k-throw
+  (lambda (k-exp env k)
+    (kt_outer-k-throw k-exp env k)))
+#;
+(define make-inner-k-throw
+  (lambda (v-exp k)
+    (kt_inner-k-throw v-exp k)))
+#;
+(define make-outer-k-let
+  (lambda (env body k)
+    (kt_outer-k-let env body k)))
+#;
+(define make-inner-k-let
+  (lambda (body k)
+    (kt_inner-k-let body k)))
+#;
+(define make-inner-k-application
+  (lambda (rand^ k)
+    (kt_inner-k-application rand^ k)))
+#;
+(define make-outer-k-application
+  (lambda (rator env k)
+    (kt_outer-k-application rator env k)))
+#;
+(define make-k-extendedenv
+  (lambda (body k)
+    (kt_k-extendenv body k)))
+#;
+(define-label empty-k
+  (lambda (unmount)
+    (kt_init-k unmount)))
+
+
+(define-union kt
+  (letcc-k body k)
+  (outer-k-mult x1 env k)
+  (inner-k-mult x2 k)
+  (k-sub1 k)
+  (k-zero k)
+  (k-if conseq alt env k)
+  (outer-k-throw k-exp env k)
+  (inner-k-throw v-exp k)
+  (outer-k-let env body k)
+  (inner-k-let body k)
+  (inner-k-application rand^ k)
+  (outer-k-application rator env k)
+  (k-extendenv body k)
+  (empty-k unmount))
+
+(define-label apply-k ; k arg
+  (union-case k kt
+              [(empty-k unmount) (dismount-trampoline unmount)]
+              [(inner-k-application rand^ k1) (begin
+                                                (set! k k1)
+                                                (set! a rand^)
+                                                (set! clos arg)
+                                                (set! pc apply-closure))
+                                              #;
+                                              (let* ([k k]
+                                                     [a rand^]
+                                                     [clos arg])
+                                                (apply-closure clos a k))]
+              [(outer-k-application rator env1 k1) (begin
+                                                     (set! k (kt_inner-k-application arg k1))
+                                                     (set! e rator)
+                                                     (set! env env1)
+                                                     (set! pc value-of-cps))
+                                                   #;
+                                                   (let* ([k (make-inner-k-application arg k)]
+                                                          [e rator] 
+                                                          [env env])
+                                                     (value-of-cps e env k))]
+              [(inner-k-let body k1) (begin
+                                       (set! k k1)
+                                       (set! e body)
+                                       (set! env arg)
+                                       (set! pc value-of-cps))
+                                     #;
+                                     (let* ([k  k]
+                                            [e body]
+                                            [env arg])
+                                       (value-of-cps e env k))]
+              [(outer-k-let env1 body k1) (begin
+                                            (set! k k1)
+                                            (set! env (envr_extend arg env1))
+                                            (set! e body)
+                                            (set! pc value-of-cps))
+                                          #;
+                                          (let* ([k k]
+                                                 [env (extend-env arg env)]
+                                                 [e body])
+                                            (value-of-cps e env k))]
+              [(inner-k-throw v-exp k1) (begin
+                                          (set! k arg)
+                                          (set! arg v-exp)
+                                          (set! pc apply-k))
+                                        #;
+                                        (let* ([k arg]
+                                               [arg v-exp])
+                                          (apply-k k arg))]
+              [(outer-k-throw k-exp env1 k1) (begin
+                                               (set! k (kt_inner-k-throw arg k1))
+                                               (set! env env1)
+                                               (set! e k-exp)
+                                               (set! pc value-of-cps))
+                                             #;
+                                             (let* ([k (make-inner-k-throw arg k)]
+                                                    [env env]
+                                                    [e k-exp])
+                                               (value-of-cps e env k))]
+              [(k-if conseq alt env1 k1) (if arg
+                                             (begin
+                                               (set! k k1)
+                                               (set! env env1)
+                                               (set! e conseq)
+                                               (set! pc value-of-cps))
+                                             #;
+                                             (let* ([k k]
+                                                    [env env]
+                                                    [e conseq])
+                                               (value-of-cps e env k))
+                                             (begin
+                                               (set! k k1)
+                                               (set! env env1)
+                                               (set! e alt)
+                                               (set! pc value-of-cps))
+                                             #;
+                                             (let* ([k k]
+                                                    [env env]
+                                                    [e alt])
+                                               (value-of-cps e env k)))]
+              [(k-zero k1) (begin
+                             (set! k k1)
+                             (set! arg (zero? arg))
+                             (set! pc apply-k))
+                           #;
+                           (let* ([k k]
+                                  [arg (zero? arg)])
+                             (apply-k k arg))]
+              [(k-sub1 k1) (begin
+                             (set! k k1)
+                             (set! arg (sub1 arg))
+                             (set! pc apply-k))
+                           #;
+                           (let* ([k k]
+                                  [arg (sub1 arg)])
+                             (apply-k k arg))]
+              [(inner-k-mult x2 k1) (begin
+                                      (set! k k1)
+                                      (set! arg (* arg x2))
+                                      (set! pc apply-k))
+                                    #;
+                                    (let* ([k k]
+                                           [arg (* arg x2)])
+                                      (apply-k k arg))]
+              [(outer-k-mult x1 env1 k1) (begin
+                                           (set! k (kt_inner-k-mult arg k1))
+                                           (set! e x1)
+                                           (set! env env1)
+                                           (set! pc value-of-cps))
+                                         #;
+                                         (let* ([k (make-inner-k-mult arg k)]
+                                                [e x1]
+                                                [env env])
+                                           (value-of-cps e env k))]
+              [(k-extendenv body k1) (begin
+                                       (set! k k1)
+                                       (set! env arg)
+                                       (set! e body)
+                                       (set! pc value-of-cps))
+                                     #;
+                                     (let* ([k k]
+                                            [env arg]
+                                            [e body])
+                                       (value-of-cps e env k))]
+              [(letcc-k body k1) (begin
+                                   (set! k k1)
+                                   (set! env arg)
+                                   (set! e body)
+                                   (set! pc value-of-cps))
+                                 #;
+                                 (let* ([k k]
+                                        [env arg]
+                                        [e body])
+                                   (value-of-cps e env k))]
+              ))
+
+#;
+(define main 
+  (lambda ()
+    (begin
+      (set! k (empty-k))
+      (set! e (expr_let 
+               (expr_lambda
+                (expr_lambda 
+                 (expr_if
+                  (expr_zero (expr_var 0))
+                  (expr_const 1)
+                  (expr_mult (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_sub1 (expr_var 0)))))))
+               (expr_mult
+                (expr_letcc
+                 (expr_app
+                  (expr_app (expr_var 1) (expr_var 1))
+                  (expr_throw (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_const 4)))))
+                (expr_const 5))))
+      (set! env (empty-env))
+      (value-of-cps))
+    #;
+    (value-of-cps 
+     (expr_let 
+      (expr_lambda
+       (expr_lambda 
+        (expr_if
+         (expr_zero (expr_var 0))
+         (expr_const 1)
+         (expr_mult (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_sub1 (expr_var 0)))))))
+      (expr_mult
+       (expr_letcc
+        (expr_app
+         (expr_app (expr_var 1) (expr_var 1))
+         (expr_throw (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_const 4)))))
+       (expr_const 5)))
+     (empty-env)
+     (empty-k))))
+
+
+
+(define-label main
+  (begin
+    ;(set! k (empty-k))
+    (set! e (expr_let 
+             (expr_lambda
+              (expr_lambda 
+               (expr_if
+                (expr_zero (expr_var 0))
+                (expr_const 1)
+                (expr_mult (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_sub1 (expr_var 0)))))))
+             (expr_mult
+              (expr_letcc
+               (expr_app
+                (expr_app (expr_var 1) (expr_var 1))
+                (expr_throw (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_const 4)))))
+              (expr_const 5))))
+    (set! env (envr_empty))
+    (set! pc value-of-cps)
+    (mount-trampoline kt_empty-k k pc)
+    (printf "Factorial of 5: ~s\n" arg)))
+
+#;
+(define main 
+  (lambda ()
+    (let/cc unmount
+      (begin
+        (set! k (empty-k unmount))
+        (set! e (expr_let 
+                 (expr_lambda
+                  (expr_lambda 
+                   (expr_if
+                    (expr_zero (expr_var 0))
+                    (expr_const 1)
+                    (expr_mult (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_sub1 (expr_var 0)))))))
+                 (expr_mult
+                  (expr_letcc
+                   (expr_app
+                    (expr_app (expr_var 1) (expr_var 1))
+                    (expr_throw (expr_var 0) (expr_app (expr_app (expr_var 1) (expr_var 1)) (expr_const 4)))))
+                  (expr_const 5))))
+        (set! env (empty-env))
+        (set! pc value-of-cps)
+        (trampoline)
+        ))))
+#;
+(define trampoline
+  (lambda ()
+    (begin
+      (pc)
+      (trampoline))))
